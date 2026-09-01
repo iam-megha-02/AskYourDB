@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/AYD_logo.png" alt="AskYourDB logo" width="150"/>
+  <img src="assets/AYD_logo.png" alt="AskYourDB logo" width="100"/>
 </p>
 
 # AskYourDB
@@ -70,13 +70,16 @@ Streamlit · LangChain · Groq · SQLite · Faker
 ## Project structure
 
 ```
-├── app.py                # Streamlit app
-├── text_to_sql.py         # SQL generation, validation, guardrails
-├── eval_set.py             # Evaluation harness
-├── check_ground_truth.py    # Independent SQL queries used to verify eval expectations
-├── create_schema.py        # Regenerates the sample DB schema
-├── generate_data.py        # Populates the sample DB
-├── ecommerce.db             # Sample database (pre-populated)
+├── app.py                  # Streamlit app - layout, session state, tab orchestration
+├── styles.py                # CSS block
+├── sql_render.py             # SQL syntax highlighting & result table rendering helpers
+├── text_to_sql.py            # SQL generation, validation, guardrails, schema tools
+├── eval_set.py                # Evaluation harness
+├── check_ground_truth.py       # Independent SQL queries used to verify eval expectations
+├── create_schema.py           # Regenerates the sample DB schema
+├── generate_data.py           # Populates the sample DB
+├── ecommerce.db                # Sample database (pre-populated)
+├── logo.png                    # App logo (README header + browser tab icon)
 ├── requirements.txt
-└── .streamlit/config.toml   # Theme config
+└── .streamlit/config.toml       # Theme config
 ```

@@ -16,7 +16,7 @@ from text_to_sql import (
 from styles import CUSTOM_CSS
 from sql_render import highlight_sql, render_dark_table
 
-st.set_page_config(page_title="AskYourDB", page_icon="AYD_logo.png", layout="wide")
+st.set_page_config(page_title="AskYourDB", page_icon="assets/AYD_logo.png", layout="wide")
 
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 

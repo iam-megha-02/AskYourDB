@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-import re
 import html as html_lib
 import tempfile
-import text_to_sql as tsql
 
+import text_to_sql as tsql
 from text_to_sql import (
     sql_chain, clean_sql, references_real_schema,
     get_query_type, is_forbidden_structural,
@@ -14,156 +13,12 @@ from text_to_sql import (
     get_schema_details, run_query_with_columns, VALID_TYPES,
     load_database, is_valid_sqlite_file
 )
+from styles import CUSTOM_CSS
+from sql_render import highlight_sql, render_dark_table
 
-st.set_page_config(page_title="AskYourDB", page_icon="assets/AYD_logo.png",layout="wide")
+st.set_page_config(page_title="AskYourDB", page_icon="AYD_logo.png", layout="wide")
 
-# ---------------- SQL syntax highlighting (manual, for full dark-theme control) ----------------
-
-SQL_KEYWORDS = (
-    r"SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|ON|GROUP BY|ORDER BY|AS|"
-    r"AND|OR|NOT|LIMIT|OFFSET|INSERT|INTO|VALUES|UPDATE|SET|DELETE|CREATE|TABLE|"
-    r"PRIMARY KEY|FOREIGN KEY|REFERENCES|DISTINCT|HAVING|CASE|WHEN|THEN|ELSE|END|"
-    r"LIKE|IN|BETWEEN|IS|NULL|DESC|ASC|COUNT|SUM|AVG|MIN|MAX|COALESCE"
-)
-
-TOKEN_PATTERN = re.compile(
-    r"(?P<string>'[^']*')"
-    r"|(?P<qident>\"[^\"]*\")"
-    r"|(?P<number>\b\d+\.?\d*\b)"
-    rf"|(?P<keyword>\b(?:{SQL_KEYWORDS})\b)",
-    re.IGNORECASE,
-)
-
-COLORS = {"string": "#CE9178", "qident": "#9CDCFE", "number": "#B5CEA8", "keyword": "#569CD6"}
-
-
-def highlight_sql(sql: str) -> str:
-    """Manually tokenize and color SQL for a dark VS Code-style theme —
-    Streamlit's built-in st.code highlighting is tuned for light backgrounds only."""
-    out, last_end = [], 0
-    for match in TOKEN_PATTERN.finditer(sql):
-        out.append(html_lib.escape(sql[last_end:match.start()]))
-        token_type = match.lastgroup
-        color = COLORS[token_type]
-        weight = "600" if token_type == "keyword" else "400"
-        out.append(f'<span style="color:{color};font-weight:{weight}">{html_lib.escape(match.group())}</span>')
-        last_end = match.end()
-    out.append(html_lib.escape(sql[last_end:]))
-    return "".join(out)
-
-
-def render_dark_table(df) -> str:
-    """Build a plain HTML table for full dark-theme control — st.dataframe
-    is canvas-rendered and can't be restyled with CSS."""
-    header = "".join(f"<th>{html_lib.escape(str(c))}</th>" for c in df.columns)
-    rows = ""
-    for _, row in df.iterrows():
-        cells = "".join(f"<td>{html_lib.escape(str(v))}</td>" for v in row)
-        rows += f"<tr>{cells}</tr>"
-    return f'<table class="dark-table"><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>'
-
-
-# ---------------- Styles ----------------
-
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'IBM Plex Sans', sans-serif;
-}
-h1, h2, h3 {
-    font-family: 'Space Grotesk', sans-serif !important;
-    letter-spacing: -0.01em;
-}
-h1{
-    margin-bottom: 0.2rem !important;
-}
-.block-container {
-    padding-top: 1rem !important;
-    padding-bottom: 1rem !important;
-}
-.panel-header {
-    padding: 14px 18px;
-    border-radius: 10px 10px 0 0;
-    font-family: 'Space Grotesk', sans-serif;
-    font-weight: 600;
-    font-size: 1.05rem;
-    color: white;
-}
-.chat-header { background-color: #0B6E76; }
-
-[data-testid="stVerticalBlockBorderWrapper"] {
-    border-radius: 0 0 10px 10px !important;
-    border-top: none !important;
-    margin-top: -1px;
-}
-[data-testid="stAlert"] {
-    border-radius: 8px;
-    border-left: 4px solid #D9932E;
-}
-.stButton button {
-    border-radius: 6px;
-    font-family: 'Space Grotesk', sans-serif;
-    font-weight: 500;
-}
-[data-testid="stChatInputSubmitButton"] {
-    background-color: #0B6E76 !important;
-}
-
-[data-testid="stCaptionContainer"] {
-    margin-bottom: 0.5rem !important;
-}
-
-header[data-testid="stHeader"] {
-    height: 2rem;
-}
-
-/* Dark VS Code-style query inspector — single palette, single box */
-:root {
-    --chrome: #17181D;
-    --surface: #1E1E1E;
-    --border: #2C2D33;
-    --text: #E6E6E6;
-    --text-muted: #8A8F98;
-}
-
-.st-key-inspector_box {
-    background-color: var(--surface) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 10px !important;
-}
-.sticky-tab {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    background-color: var(--chrome);
-    padding: 10px 18px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border-bottom: 1px solid var(--border);
-    margin: -1rem -1rem 0.75rem -1rem;
-}
-.query-code {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.85rem;
-    color: var(--text);
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-.result-header {
-    color: white;
-    font-family: 'Space Grotesk', sans-serif;
-    font-weight: 600;
-    font-size: 1.0rem;
-    margin: 14px 0 8px;
-}
-table.dark-table { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; color: var(--text); }
-table.dark-table th { background-color: var(--chrome); text-align: left; padding: 8px 10px; border: 1px solid var(--border); color: #9CDCFE; }
-table.dark-table td { padding: 8px 10px; border: 1px solid var(--border); }
-</style>
-""", unsafe_allow_html=True)
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 st.title("AskYourDB: Chat with your database")
 st.caption("Ask questions about your database in plain English, and see the generated SQL and results.")
@@ -191,16 +46,18 @@ def reset_session_state():
     st.session_state.pending_table_creation = False
 
 
+PANEL_HEIGHT = 460
+
 tab_assistant, tab_schema, tab_upload = st.tabs(["Assistant", "Schema", "Upload DB"])
 
 # ==================== ASSISTANT TAB ====================
 with tab_assistant:
     left_col, right_col = st.columns([1, 1])
 
-    # ---------------- LEFT: chat ----------------
+    # ---------------- LEFT: chat — same structure as the right panel ----------------
     with left_col:
-        st.markdown('<div class="panel-header chat-header">💬 Ask a question</div>', unsafe_allow_html=True)
-        with st.container(border=True, height=320):
+        with st.container(border=True, height=PANEL_HEIGHT):
+            st.markdown('<div class="panel-header chat-header sticky-tab" style="border-radius:10px 10px 0 0;">💬 Ask a question</div>', unsafe_allow_html=True)
             for entry in st.session_state.chat_history:
                 with st.chat_message("user"):
                     st.write(entry["question"])
@@ -262,9 +119,9 @@ with tab_assistant:
                 })
                 st.rerun()
 
-    # ---------------- RIGHT: query inspector — single black box, sticky tab bar ----------------
+    # ---------------- RIGHT: query inspector — same structure as the left panel ----------------
     with right_col:
-        with st.container(key="inspector_box", height=320):
+        with st.container(key="inspector_box", height=PANEL_HEIGHT):
             st.markdown("""
             <div class="sticky-tab">
                 <span style="width:11px;height:11px;border-radius:50%;background:#FF5F56;display:inline-block;"></span>
@@ -372,6 +229,7 @@ with tab_assistant:
                 st.info("Ask a question on the left to see the generated SQL and raw results here.")
 
 # ==================== SCHEMA TAB ====================
+
 with tab_schema:
     st.subheader("Database schema")
 
@@ -384,18 +242,31 @@ with tab_schema:
 
         for col, (table, info) in zip(cols, row_tables):
             with col:
-                with st.expander(f"{table}", expanded=True):
+                with st.expander(f"📋 {table}", expanded=True):
+                    lines = []
                     for name, col_type, is_pk in info["columns"]:
                         pk_marker = " 🔑 primary key" if is_pk else ""
-                        st.markdown(f"- `{name}` — *{col_type}*{pk_marker}")
+                        lines.append(f"<li><code>{name}</code> — <em>{col_type}</em>{pk_marker}</li>")
+
+                    fk_html = ""
                     if info["foreign_keys"]:
-                        st.markdown("**Relationships:**")
-                        for from_col, to_table, to_col in info["foreign_keys"]:
-                            st.markdown(f"- `{from_col}` → `{to_table}.{to_col}`")
+                        fk_lines = "".join(
+                            f"<li><code>{from_col}</code> → <code>{to_table}.{to_col}</code></li>"
+                            for from_col, to_table, to_col in info["foreign_keys"]
+                        )
+                        fk_html = f"<p><strong>Relationships:</strong></p><ul>{fk_lines}</ul>"
+
+                    card_html = f"""
+                    <div class="schema-card-body">
+                        <ul>{''.join(lines)}</ul>
+                        {fk_html}
+                    </div>
+                    """
+                    st.markdown(card_html, unsafe_allow_html=True)
 
 # ==================== UPLOAD DB TAB ====================
 with tab_upload:
-    st.subheader("Upload DB")
+    st.subheader("📤 Upload DB")
     st.caption(f"Currently connected to: **{st.session_state.active_db_name}**")
 
     uploaded = st.file_uploader("Upload a SQLite (.db) file", type=["db", "sqlite", "sqlite3"])
@@ -403,7 +274,7 @@ with tab_upload:
     col_a, col_b = st.columns([2, 1])
     with col_a:
         if uploaded is not None:
-            if st.button(f"Load '{uploaded.name}'"):
+            if st.button(f"📤 Load '{uploaded.name}'"):
                 temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".db").name
                 with open(temp_path, "wb") as f:
                     f.write(uploaded.getbuffer())
@@ -417,7 +288,7 @@ with tab_upload:
                 else:
                     st.error("That doesn't look like a valid SQLite database file.")
     with col_b:
-        if st.button("↩ Reset to sample DB"):
+        if st.button("↩️ Reset to sample DB"):
             load_database("ecommerce.db")
             st.session_state.active_db_name = "ecommerce.db (sample)"
             reset_session_state()

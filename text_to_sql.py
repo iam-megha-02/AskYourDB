@@ -1,3 +1,5 @@
+import os
+import streamlit as st
 import re
 import time
 import sqlite3
@@ -54,7 +56,7 @@ def build_sql_chain(target_db):
     return create_sql_query_chain(llm, target_db, prompt=custom_prompt)
 
 db = SQLDatabase.from_uri(f"sqlite:///{DB_PATH}")
-llm = ChatGroq(model="qwen/qwen3.8-27b", temperature=0)
+llm = ChatGroq(model="qwen/qwen3.8-27b", temperature=0, groq_api_key=GROQ_API_KEY)
 summarizer_llm = ChatGroq(model="qwen/qwen3.8-27b", temperature=0)
 
 sql_chain = build_sql_chain(db)
@@ -273,3 +275,14 @@ def ask_question(question: str, retries: int = 2):
     except Exception as e:
         print("ERROR executing SQL:", e)
         return None
+
+def get_secret(key: str) -> str:
+    """Works both locally (.env) and on Streamlit Cloud (st.secrets)."""
+    if key in os.environ:
+        return os.environ[key]
+    try:
+        return st.secrets[key]
+    except Exception:
+        raise RuntimeError(f"{key} not found in environment or Streamlit secrets.")
+
+GROQ_API_KEY = get_secret("GROQ_API_KEY")

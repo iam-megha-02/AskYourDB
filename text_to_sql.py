@@ -12,6 +12,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def get_secret(key: str) -> str:
+    """Works both locally (.env) and on Streamlit Cloud (st.secrets)."""
+    if key in os.environ:
+        return os.environ[key]
+    try:
+        return st.secrets[key]
+    except Exception:
+        raise RuntimeError(f"{key} not found in environment or Streamlit secrets.")
+
+GROQ_API_KEY = get_secret("GROQ_API_KEY")
+
 DB_PATH = "ecommerce.db"
 
 CUSTOM_SUFFIX = """
@@ -276,13 +287,3 @@ def ask_question(question: str, retries: int = 2):
         print("ERROR executing SQL:", e)
         return None
 
-def get_secret(key: str) -> str:
-    """Works both locally (.env) and on Streamlit Cloud (st.secrets)."""
-    if key in os.environ:
-        return os.environ[key]
-    try:
-        return st.secrets[key]
-    except Exception:
-        raise RuntimeError(f"{key} not found in environment or Streamlit secrets.")
-
-GROQ_API_KEY = get_secret("GROQ_API_KEY")

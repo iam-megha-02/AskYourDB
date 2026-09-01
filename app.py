@@ -76,6 +76,13 @@ h1, h2, h3 {
     font-family: 'Space Grotesk', sans-serif !important;
     letter-spacing: -0.01em;
 }
+h1{
+    margin-bottom: 0.2rem !important;
+}
+.block-container {
+    padding-top: 1rem !important;
+    padding-bottom: 1rem !important;
+}
 .panel-header {
     padding: 14px 18px;
     border-radius: 10px 10px 0 0;
@@ -102,6 +109,14 @@ h1, h2, h3 {
 }
 [data-testid="stChatInputSubmitButton"] {
     background-color: #0B6E76 !important;
+}
+
+[data-testid="stCaptionContainer"] {
+    margin-bottom: 0.5rem !important;
+}
+
+header[data-testid="stHeader"] {
+    height: 2rem;
 }
 
 /* Dark VS Code-style query inspector — single palette, single box */
@@ -185,7 +200,7 @@ with tab_assistant:
     # ---------------- LEFT: chat ----------------
     with left_col:
         st.markdown('<div class="panel-header chat-header">💬 Ask a question</div>', unsafe_allow_html=True)
-        with st.container(border=True, height=420):
+        with st.container(border=True, height=320):
             for entry in st.session_state.chat_history:
                 with st.chat_message("user"):
                     st.write(entry["question"])
@@ -249,7 +264,7 @@ with tab_assistant:
 
     # ---------------- RIGHT: query inspector — single black box, sticky tab bar ----------------
     with right_col:
-        with st.container(key="inspector_box", height=520):
+        with st.container(key="inspector_box", height=320):
             st.markdown("""
             <div class="sticky-tab">
                 <span style="width:11px;height:11px;border-radius:50%;background:#FF5F56;display:inline-block;"></span>

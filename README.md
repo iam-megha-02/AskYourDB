@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="AYD_logo.png" alt="AskYourDB logo" width="150"/>
+  <img src="assets/AYD_logo.png" alt="AskYourDB logo" width="150"/>
 </p>
 
 # AskYourDB
@@ -43,22 +43,22 @@ streamlit run app.py
 
 ## Safety design
 
-- **Structural changes (CREATE, DROP, ALTER, TRUNCATE) are blocked unconditionally** — no confirmation can override these. Table creation goes through a form instead, since schema design isn't something a single LLM-generated sentence should decide.
-- **DELETE/UPDATE with no WHERE clause is blocked automatically** — the most common way to accidentally wipe a table.
-- **All other writes require explicit confirmation** — the generated SQL is shown before anything executes.
-- **Queries that don't reference a real table are blocked** — added after testing showed the model could generate a plausible, successfully-executing but fabricated query instead of failing visibly.
+- **Structural changes (CREATE, DROP, ALTER, TRUNCATE) are blocked unconditionally** - no confirmation can override these. Table creation goes through a form instead, since schema design isn't something a single LLM-generated sentence should decide.
+- **DELETE/UPDATE with no WHERE clause is blocked automatically** - the most common way to accidentally wipe a table.
+- **All other writes require explicit confirmation** - the generated SQL is shown before anything executes.
+- **Queries that don't reference a real table are blocked** - added after testing showed the model could generate a plausible, successfully-executing but fabricated query instead of failing visibly.
 - Verified directly that destructive requests phrased conversationally, not just as obvious SQL keywords, are still caught by the deterministic check rather than relying on the model to refuse.
 
 ## Known limitations
 
-- **No authentication.** Built for single-owner, local/personal use — not session-isolated for multiple concurrent users.
+- **No authentication.** Built for single-owner, local/personal use - not session-isolated for multiple concurrent users.
 - **Ambiguous questions can resolve inconsistently.** E.g. "average items per order" was answered differently across runs depending on whether "items" meant line items or total quantity.
 - **Some window-function and nested-aggregation questions are unreliable.** Targeted prompt instructions improved this but don't guarantee correctness on every similarly-structured question.
 - **Exhaustive-list questions can be silently truncated** by a default LIMIT the SQL generator sometimes applies even when the question implies "show everything."
 
 ## Evaluation
 
-`eval_set.py` runs test questions — lookups, joins, aggregations, ambiguous phrasing, and adversarial/out-of-scope questions — against the live pipeline, checked against independently-verified ground truth:
+`eval_set.py` runs test questions - lookups, joins, aggregations, ambiguous phrasing, and adversarial/out-of-scope questions - against the live pipeline, checked against independently-verified ground truth:
 ```bash
 python eval_set.py
 ```

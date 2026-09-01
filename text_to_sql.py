@@ -57,7 +57,6 @@ def build_sql_chain(target_db):
         before, after = original_template.split(marker, 1)
         new_template = before + CUSTOM_SUFFIX + "\n" + marker + after
     else:
-        # Fallback: prepend at the very start if the expected marker isn't found
         new_template = CUSTOM_SUFFIX + "\n" + original_template
 
     custom_prompt = PromptTemplate(

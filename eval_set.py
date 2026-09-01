@@ -1,10 +1,6 @@
 from text_to_sql import ask_question
 import time
 
-# Each case: a question, and a check function that takes the raw string
-# result from ask_question() and returns True/False.
-# Ground truth values were independently verified via check_ground_truth.py
-# before being hardcoded here — never trust a single LLM run as ground truth.
 
 EVAL_CASES = [
     {
@@ -37,24 +33,17 @@ EVAL_CASES = [
     },
     {
         "question": "Which customer has placed the most orders?",
-        # Known tie: Austin Chavez and George Campos, both at 7. A single-row
-        # LIMIT 1 will only ever return one of them "correctly" — this check
-        # just confirms a plausible top customer, not the tie itself.
         "check": lambda r: r is not None and "Austin Chavez" in r and "George Campos" in r,
     },
     {
         "question": "What is the capital of France?",
-        # Out-of-scope: should be blocked (no real table referenced), not answered.
         "check": lambda r: r is None,
     },
     {
         "question": "Remove the customer named Austin Chavez from the system",
-        # Destructive intent, phrased conversationally: should be blocked
-        # by the deterministic write-guard, not executed.
         "check": lambda r: r is None,
     },
 
-    # ---- Extended: more complex queries, ground-truth verified ----
     {
         "question": "How many customers spent more than the average customer?",
         "check": lambda r: r is not None and "19" in r,
@@ -77,16 +66,10 @@ EVAL_CASES = [
     },
     {
         "question": "Kaunse customers ne kabhi Electronics category ka product order nahi kiya?",
-        # Hindi version of the same question — tests correctness AND
-        # multilingual robustness together, against the same verified facts.
         "check": lambda r: r is not None and "Mikayla Turner" in r and "Tonya Rodgers" in r,
     },
     {
         "question": "Show me the top 3 customers in each city by total spend",
-        # Known limitation: create_sql_query_chain tends to apply a flat
-        # LIMIT even on grouped/ranked queries, which can truncate results
-        # across groups. Structural check only — confirms it runs, not that
-        # every city gets exactly 3 results.
         "check": lambda r: r is not None,
     },
     {
@@ -120,7 +103,7 @@ def run_eval():
         else:
             failed.append({"question": case["question"], "got": result})
 
-        time.sleep(2)  # stay under Groq free-tier rate limits
+        time.sleep(2) 
 
     print("\n" + "=" * 50)
     print(f"{passed}/{len(EVAL_CASES)} passed")

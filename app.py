@@ -54,7 +54,7 @@ tab_assistant, tab_schema, tab_upload = st.tabs(["Assistant", "Schema", "Upload 
 with tab_assistant:
     left_col, right_col = st.columns([1, 1])
 
-    # ---------------- LEFT: chat — same structure as the right panel ----------------
+    # ---------------- LEFT: chat ----------------
     with left_col:
         with st.container(border=True, height=PANEL_HEIGHT):
             st.markdown('<div class="panel-header chat-header sticky-tab" style="border-radius:10px 10px 0 0;">💬 Ask a question</div>', unsafe_allow_html=True)
@@ -119,7 +119,7 @@ with tab_assistant:
                 })
                 st.rerun()
 
-    # ---------------- RIGHT: query inspector — same structure as the left panel ----------------
+    # ---------------- RIGHT: query inspector ----------------
     with right_col:
         with st.container(key="inspector_box", height=PANEL_HEIGHT):
             st.markdown("""

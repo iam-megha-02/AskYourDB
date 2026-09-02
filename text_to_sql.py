@@ -5,9 +5,8 @@ import time
 import sqlite3
 from langchain_community.utilities import SQLDatabase
 from langchain_groq import ChatGroq
-from langchain.chains import create_sql_query_chain
-from langchain_core.prompts import PromptTemplate
-from langchain.chains.sql_database.prompt import SQL_PROMPTS
+from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,6 +23,29 @@ def get_secret(key: str) -> str:
 GROQ_API_KEY = get_secret("GROQ_API_KEY")
 
 DB_PATH = "ecommerce.db"
+
+VALID_TYPES = [
+    "INTEGER", "TEXT", "REAL", "BLOB",
+    "VARCHAR(255)", "DATE", "DATETIME", "BOOLEAN", "NUMERIC", "FLOAT"
+]
+
+VALID_SQL_STARTS = {"SELECT", "DELETE", "UPDATE", "INSERT", "WITH"}
+
+
+# ---------------- Structured output schema ----------------
+
+class SQLGenerationResult(BaseModel):
+    """SQL arrives as a validated field, not free text requiring markdown/
+    prefix parsing — this replaces the old create_sql_query_chain + regex
+    clean_sql() approach with LangChain's structured output."""
+    sql: str = Field(
+        description="A single syntactically correct SQLite statement that answers "
+                    "the question. No markdown formatting, no explanation — just the SQL."
+    )
+    reasoning: str = Field(
+        description="One brief sentence explaining why this query answers the question."
+    )
+
 
 CUSTOM_SUFFIX = """
 When a question asks for "the most", "the highest", "the top", or similar
@@ -44,37 +66,49 @@ WHERE or HAVING clause in the same query where they are calculated. Always
 compute the window function in a subquery or CTE first, then filter on it
 in an outer query.
 """
+
+SQL_PROMPT_TEMPLATE = """You are a SQLite expert. Given an input question, create a
+syntactically correct SQLite query to answer it, then explain briefly why it answers
+the question.
+
+Unless the question specifies a number of results, do not add an arbitrary LIMIT —
+only limit results when the question implies a specific count (e.g. "top 5").
+Never select all columns — only the ones needed to answer the question.
+Wrap column names in double quotes to denote them as delimited identifiers.
+Use only the column names visible in the schema below — do not invent columns.
+Use date('now') for "today" if the question involves the current date.
+
+{custom_suffix}
+
+Recent conversation history (use this to resolve follow-up references like
+"those", "it", "the same but...", or an implicit filter continuing a prior
+question — ignore it if the current question is fully self-contained):
+{conversation_history}
+
+Only use the following tables:
+{table_info}
+
+Question: {question}"""
+
+
+# ---------------- Model/chain setup ----------------
+
 def build_sql_chain(target_db):
-    """Builds the SQL generation chain with our custom instructions inserted
-    BEFORE the format/question section of LangChain's default SQLite prompt —
-    appending after {input} would place instructions after the question,
-    where the model is already expected to start answering."""
-    base_prompt = SQL_PROMPTS["sqlite"]
-    marker = "Use the following format:"
-    original_template = base_prompt.template
+    """Structured-output SQL generation chain, replacing the previous
+    create_sql_query_chain + regex-based clean_sql() approach."""
+    table_info = target_db.get_table_info()
 
-    if marker in original_template:
-        before, after = original_template.split(marker, 1)
-        new_template = before + CUSTOM_SUFFIX + "\n" + marker + after
-    else:
-        new_template = CUSTOM_SUFFIX + "\n" + original_template
+    prompt = ChatPromptTemplate.from_template(SQL_PROMPT_TEMPLATE)
+    structured_llm = llm.with_structured_output(SQLGenerationResult)
 
-    custom_prompt = PromptTemplate(
-        input_variables=base_prompt.input_variables,
-        template=new_template,
-    )
-    return create_sql_query_chain(llm, target_db, prompt=custom_prompt)
+    return prompt.partial(custom_suffix=CUSTOM_SUFFIX, table_info=table_info) | structured_llm
+
 
 db = SQLDatabase.from_uri(f"sqlite:///{DB_PATH}")
 llm = ChatGroq(model="qwen/qwen3.8-27b", temperature=0, groq_api_key=GROQ_API_KEY)
-summarizer_llm = ChatGroq(model="qwen/qwen3.8-27b", temperature=0)
+summarizer_llm = ChatGroq(model="qwen/qwen3.8-27b", temperature=0, groq_api_key=GROQ_API_KEY)
 
 sql_chain = build_sql_chain(db)
-
-VALID_TYPES = [
-    "INTEGER", "TEXT", "REAL", "BLOB",
-    "VARCHAR(255)", "DATE", "DATETIME", "BOOLEAN", "NUMERIC", "FLOAT"
-]
 
 
 # ---------------- Database switching (sample DB vs. user-uploaded) ----------------
@@ -101,23 +135,32 @@ def is_valid_sqlite_file(path: str) -> bool:
 
 # ---------------- SQL cleanup / validation ----------------
 
-def clean_sql(raw_output: str):
-    """Extract just the SQL from the LLM's raw output. Returns None if
-    the model responded in plain English instead of SQL."""
-    if "SQLQuery:" in raw_output:
-        raw_output = raw_output.split("SQLQuery:")[-1]
-    raw_output = raw_output.strip()
-    if raw_output.startswith("```"):
-        raw_output = re.sub(r"^```(?:sql)?\s*", "", raw_output)
-        raw_output = re.sub(r"\s*```$", "", raw_output)
-    raw_output = raw_output.strip()
-    if not raw_output or raw_output.lower().startswith(("answer:", "i cannot", "the provided")):
+def clean_sql(sql_text):
+    """Light normalization for structured-output SQL. Markdown fences aren't
+    expected anymore (the model fills a typed field, not free text) but we
+    defensively strip them anyway, then confirm the result actually starts
+    with a real SQL keyword rather than a refusal stuffed into the field."""
+    if not sql_text or not sql_text.strip():
         return None
-    return raw_output.strip().strip(";") + ";"
+
+    text = sql_text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:sql)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    text = text.strip()
+
+    if not text:
+        return None
+
+    first_word = text.split()[0].upper() if text.split() else ""
+    if first_word not in VALID_SQL_STARTS:
+        return None
+
+    return text.strip().strip(";") + ";"
 
 
-def references_real_schema(query: str, db: SQLDatabase) -> bool:
-    real_tables = [t.lower() for t in db.get_usable_table_names()]
+def references_real_schema(query: str, target_db: SQLDatabase) -> bool:
+    real_tables = [t.lower() for t in target_db.get_usable_table_names()]
     return any(table in query.lower() for table in real_tables)
 
 
@@ -153,6 +196,84 @@ def describe_write(sql: str, query_type: str) -> str:
 Be specific about which rows are affected (mention actual values/conditions from the WHERE clause if present).
 SQL: {sql}"""
     return summarizer_llm.invoke(prompt).content
+
+
+# ---------------- Core generation + validation (single attempt) ----------------
+
+def generate_sql(question: str, conversation_history: str = ""):
+    """One LLM call + cleaning + guardrail checks. Does NOT execute anything.
+    Returns (sql, query_type, block_reason):
+      - block_reason is None and query_type is set  -> safe to proceed
+      - block_reason is set                          -> caller should stop and show it
+    """
+    try:
+        result = sql_chain.invoke({"question": question, "conversation_history": conversation_history})
+    except Exception as e:
+        return None, None, f"LLM call failed: {e}"
+
+    if not result or not result.sql:
+        return None, None, "Model did not return SQL."
+
+    sql = clean_sql(result.sql)
+    if sql is None:
+        return None, None, "Model declined to generate valid SQL for this question."
+
+    if is_forbidden_structural(sql):
+        return sql, None, "That would alter the database structure — not allowed."
+
+    if not references_real_schema(sql, db):
+        return sql, None, "Generated query didn't reference real data — blocked."
+
+    return sql, get_query_type(sql), None
+
+
+# ---------------- Retry-on-real-error (READ queries only) ----------------
+
+def execute_read_with_retry(question: str, conversation_history: str = "", max_retries: int = 2):
+    """Generates and executes a READ query. If execution fails with a real
+    database error, feeds that error back to the model and retries with a
+    corrected query — bounded, not infinite. Writes are handed back to the
+    caller unexecuted, for the confirmation flow instead.
+
+    Returns a dict with a 'status' field:
+      'success'   -> columns, rows, sql, attempts
+      'blocked'   -> sql (maybe None), reason
+      'not_read'  -> sql, query_type (caller routes to write-confirmation UI)
+      'failed'    -> sql, reason (exhausted retries)
+    """
+    current_question = question
+    last_sql = None
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        sql, query_type, block_reason = generate_sql(current_question, conversation_history)
+        last_sql = sql
+
+        if block_reason:
+            return {"status": "blocked", "sql": sql, "reason": block_reason}
+
+        if query_type != "READ":
+            return {"status": "not_read", "sql": sql, "query_type": query_type}
+
+        try:
+            columns, rows = run_query_with_columns(sql)
+            return {
+                "status": "success", "sql": sql, "columns": columns,
+                "rows": rows, "attempts": attempt + 1
+            }
+        except Exception as e:
+            last_error = str(e)
+            print(f"Attempt {attempt + 1} failed: {last_error}. Retrying with error feedback...")
+            current_question = (
+                f"{question}\n\n"
+                f"(A previous attempt generated this SQL, which failed:\n{sql}\n"
+                f"Database error: {last_error}\nPlease generate a corrected query that fixes this.)"
+            )
+
+    return {
+        "status": "failed", "sql": last_sql,
+        "reason": f"Failed after {max_retries + 1} attempts. Last error: {last_error}"
+    }
 
 
 # ---------------- Create-table intent + form-driven DDL ----------------
@@ -220,10 +341,10 @@ def get_schema_details():
     schema = {}
     for table in tables:
         cursor.execute(f"PRAGMA table_info({table})")
-        columns = [(row[1], row[2], bool(row[5])) for row in cursor.fetchall()]  # name, type, is_pk
+        columns = [(row[1], row[2], bool(row[5])) for row in cursor.fetchall()]
 
         cursor.execute(f"PRAGMA foreign_key_list({table})")
-        fks = [(row[3], row[2], row[4]) for row in cursor.fetchall()]  # from_col, to_table, to_col
+        fks = [(row[3], row[2], row[4]) for row in cursor.fetchall()]
 
         schema[table] = {"columns": columns, "foreign_keys": fks}
 
@@ -249,40 +370,18 @@ def run_query_with_columns(sql: str):
 # ---------------- Headless usage (scripts / eval_set.py) ----------------
 
 def ask_question(question: str, retries: int = 2):
-    """Read-only, headless usage — writes stay fully blocked here,
-    since there's no confirmation UI outside the Streamlit app."""
-    for attempt in range(retries + 1):
+    """Read-only, headless usage — thin wrapper around execute_read_with_retry,
+    kept for eval_set.py's existing call signature (expects a string result)."""
+    outcome = execute_read_with_retry(question, conversation_history="", max_retries=retries)
+
+    if outcome["status"] == "success":
+        print("Generated SQL:", outcome["sql"])
+        conn = sqlite3.connect(DB_PATH)
         try:
-            raw_sql = sql_chain.invoke({"question": question})
-        except Exception as e:
-            print("ERROR calling LLM:", e)
-            return None
-        if raw_sql.strip():
-            break
-        print(f"Empty output (attempt {attempt + 1}/{retries + 1}), retrying...")
-        time.sleep(3)
+            cursor = conn.execute(outcome["sql"])
+            return str(cursor.fetchall())
+        finally:
+            conn.close()
     else:
-        print("LLM returned empty output after retries.")
+        print(f"[{outcome['status']}] {outcome.get('reason', outcome.get('query_type'))}")
         return None
-
-    print("RAW OUTPUT:", repr(raw_sql))
-    sql = clean_sql(raw_sql)
-    if sql is None:
-        print("Model declined to generate SQL.")
-        return None
-    print("Generated SQL:", sql)
-
-    if is_forbidden_structural(sql) or get_query_type(sql) != "READ":
-        print("Blocked: this is a script context with no confirmation flow — writes not allowed here.")
-        return None
-
-    if not references_real_schema(sql, db):
-        print("Query doesn't reference any real table — blocked.")
-        return None
-
-    try:
-        return db.run(sql)
-    except Exception as e:
-        print("ERROR executing SQL:", e)
-        return None
-

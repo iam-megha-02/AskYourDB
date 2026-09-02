@@ -6,17 +6,21 @@ import tempfile
 
 import text_to_sql as tsql
 from text_to_sql import (
-    sql_chain, clean_sql, references_real_schema,
-    get_query_type, is_forbidden_structural,
+    clean_sql, references_real_schema,
     is_safe_write, describe_write, summarizer_llm,
     is_create_table_request, build_create_table_sql, refresh_schema,
-    get_schema_details, run_query_with_columns, VALID_TYPES,
-    load_database, is_valid_sqlite_file
+    get_schema_details, VALID_TYPES,
+    load_database, is_valid_sqlite_file, execute_read_with_retry
+)
+from conversation_store import (
+    init_history_db, save_exchange, load_recent_history, format_history_for_prompt, clear_history
 )
 from styles import CUSTOM_CSS
 from sql_render import highlight_sql, render_dark_table
 
 st.set_page_config(page_title="AskYourDB", page_icon="assets/AYD_logo.png", layout="wide")
+
+init_history_db()
 
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
@@ -24,24 +28,37 @@ st.title("AskYourDB: Chat with your database")
 st.caption("Ask questions about your database in plain English, and see the generated SQL and results.")
 
 # ---------------- Session state ----------------
+if "active_db_name" not in st.session_state:
+    st.session_state.active_db_name = "ecommerce.db (sample)"
+
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+    persisted = load_recent_history(st.session_state.active_db_name, limit=10)
+    st.session_state.chat_history = [
+        {"question": q, "sql": s, "result": None, "columns": None, "summary": summary}
+        for q, s, summary in persisted
+    ]
+
 if "pending_write" not in st.session_state:
     st.session_state.pending_write = None
 if "pending_table_creation" not in st.session_state:
     st.session_state.pending_table_creation = False
 if "new_columns" not in st.session_state:
     st.session_state.new_columns = [{"name": "", "type": "TEXT", "is_pk": False, "fk_table": None, "fk_column": None}]
-if "active_db_name" not in st.session_state:
-    st.session_state.active_db_name = "ecommerce.db (sample)"
 
 
 def blank_column():
     return {"name": "", "type": "TEXT", "is_pk": False, "fk_table": None, "fk_column": None}
 
 
-def reset_session_state():
-    st.session_state.chat_history = []
+def switch_database(db_name: str):
+    """Called on upload/reset — loads that database's persisted history
+    instead of blanking it, so conversation memory survives across sessions."""
+    st.session_state.active_db_name = db_name
+    persisted = load_recent_history(db_name, limit=10)
+    st.session_state.chat_history = [
+        {"question": q, "sql": s, "result": None, "columns": None, "summary": summary}
+        for q, s, summary in persisted
+    ]
     st.session_state.pending_write = None
     st.session_state.pending_table_creation = False
 
@@ -64,59 +81,72 @@ with tab_assistant:
                 with st.chat_message("assistant"):
                     st.write(entry["summary"])
 
-        user_question = st.chat_input("Ask a question about your store's data")
+        col_input, col_clear = st.columns([5, 1])
+        with col_input:
+            user_question = st.chat_input("Ask a question about your store's data")
+        with col_clear:
+            if st.button("🗑️ Clear memory"):
+                clear_history(st.session_state.active_db_name)
+                st.session_state.chat_history = []
+                st.rerun()
 
         if user_question:
             if is_create_table_request(user_question):
+                summary = "Sure — fill in the table details in the panel on the right."
                 st.session_state.chat_history.append({
-                    "question": user_question,
-                    "sql": "(form)",
-                    "result": None,
-                    "columns": None,
-                    "summary": "Sure — fill in the table details in the panel on the right."
+                    "question": user_question, "sql": "(form)", "result": None,
+                    "columns": None, "summary": summary
                 })
+                save_exchange(st.session_state.active_db_name, user_question, "(form)", summary)
                 st.session_state.pending_table_creation = True
                 st.rerun()
             else:
                 with st.spinner("Thinking..."):
-                    raw_sql = sql_chain.invoke({"question": user_question})
-                    sql = clean_sql(raw_sql)
-                    columns = None
+                    history_rows = load_recent_history(st.session_state.active_db_name, limit=5)
+                    conversation_history = format_history_for_prompt(history_rows)
 
-                    if sql is None:
-                        summary, result, sql_display = "I couldn't turn that into a database query.", None, "(none)"
-                    elif is_forbidden_structural(sql):
-                        summary, result, sql_display = "That would alter the database structure — not allowed.", None, sql
-                    elif not references_real_schema(sql, tsql.db):
-                        summary, result, sql_display = "I generated a query that didn't reference real data — blocked.", None, sql
-                    else:
-                        query_type = get_query_type(sql)
-                        if query_type == "READ":
-                            try:
-                                columns, rows = run_query_with_columns(sql)
-                                result = rows
-                                sql_display = sql
-                                summary = summarizer_llm.invoke(
-                                    f"Question: {user_question}\nSQL: {sql}\nRaw result: {result}\n\n"
-                                    "Answer in one or two plain, friendly sentences based only on the result. Don't mention SQL."
-                                ).content
-                            except Exception as e:
-                                summary, result, sql_display = f"The query failed: {e}", None, sql
+                    outcome = execute_read_with_retry(user_question, conversation_history)
+
+                    columns, result, sql_display = None, None, "(none)"
+
+                    if outcome["status"] == "success":
+                        columns = outcome["columns"]
+                        result = outcome["rows"]
+                        sql_display = outcome["sql"]
+                        summary = summarizer_llm.invoke(
+                            f"Question: {user_question}\nSQL: {sql_display}\nRaw result: {result}\n\n"
+                            "Answer in one or two plain, friendly sentences based only on the result. Don't mention SQL."
+                        ).content
+                        if outcome["attempts"] > 1:
+                            summary += f"  _(needed {outcome['attempts']} attempts — corrected a query error along the way)_"
+
+                    elif outcome["status"] == "blocked":
+                        summary = outcome["reason"]
+                        sql_display = outcome["sql"] or "(none)"
+
+                    elif outcome["status"] == "not_read":
+                        sql = outcome["sql"]
+                        query_type = outcome["query_type"]
+                        sql_display = sql
+                        safe, reason = is_safe_write(sql, query_type)
+                        if not safe:
+                            summary = f"Blocked: {reason}"
                         else:
-                            safe, reason = is_safe_write(sql, query_type)
-                            result, sql_display = None, sql
-                            if not safe:
-                                summary = f"Blocked: {reason}"
-                            else:
-                                st.session_state.pending_write = {
-                                    "question": user_question, "sql": sql, "query_type": query_type
-                                }
-                                summary = f"This will run a {query_type} — check the panel on the right to review and confirm."
+                            st.session_state.pending_write = {
+                                "question": user_question, "sql": sql, "query_type": query_type
+                            }
+                            summary = f"This will run a {query_type} — check the panel on the right to review and confirm."
 
-                st.session_state.chat_history.append({
+                    else:  # failed after retries
+                        summary = f"Couldn't get a working query: {outcome['reason']}"
+                        sql_display = outcome.get("sql") or "(none)"
+
+                entry = {
                     "question": user_question, "sql": sql_display, "result": result,
                     "columns": columns, "summary": summary
-                })
+                }
+                st.session_state.chat_history.append(entry)
+                save_exchange(st.session_state.active_db_name, user_question, sql_display, summary)
                 st.rerun()
 
     # ---------------- RIGHT: query inspector ----------------
@@ -170,10 +200,12 @@ with tab_assistant:
                             refresh_schema()
                             st.session_state.pending_table_creation = False
                             st.session_state.new_columns = [blank_column()]
+                            summary = f"Table '{new_table_name}' created successfully."
                             st.session_state.chat_history.append({
                                 "question": "", "sql": preview_sql, "result": None, "columns": None,
-                                "summary": f"Table '{new_table_name}' created successfully."
+                                "summary": summary
                             })
+                            save_exchange(st.session_state.active_db_name, "", preview_sql, summary)
                             st.success(f"Table '{new_table_name}' created.")
                             st.rerun()
                     except ValueError as e:
@@ -206,7 +238,7 @@ with tab_assistant:
 
             elif st.session_state.chat_history:
                 latest = st.session_state.chat_history[-1]
-                highlighted = highlight_sql(latest["sql"])
+                highlighted = highlight_sql(latest["sql"] or "")
 
                 if latest.get("columns") and latest.get("result"):
                     df = pd.DataFrame(latest["result"], columns=latest["columns"])
@@ -281,8 +313,7 @@ with tab_upload:
 
                 if is_valid_sqlite_file(temp_path):
                     load_database(temp_path)
-                    st.session_state.active_db_name = uploaded.name
-                    reset_session_state()
+                    switch_database(uploaded.name)
                     st.success(f"Now chatting with '{uploaded.name}'")
                     st.rerun()
                 else:
@@ -290,6 +321,5 @@ with tab_upload:
     with col_b:
         if st.button("↩️ Reset to sample DB"):
             load_database("ecommerce.db")
-            st.session_state.active_db_name = "ecommerce.db (sample)"
-            reset_session_state()
+            switch_database("ecommerce.db (sample)")
             st.rerun()

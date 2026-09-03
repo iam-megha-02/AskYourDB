@@ -5,7 +5,7 @@ SQL_KEYWORDS = (
     r"SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|ON|GROUP BY|ORDER BY|AS|"
     r"AND|OR|NOT|LIMIT|OFFSET|INSERT|INTO|VALUES|UPDATE|SET|DELETE|CREATE|TABLE|"
     r"PRIMARY KEY|FOREIGN KEY|REFERENCES|DISTINCT|HAVING|CASE|WHEN|THEN|ELSE|END|"
-    r"LIKE|IN|BETWEEN|IS|NULL|DESC|ASC|COUNT|SUM|AVG|MIN|MAX|COALESCE"
+    r"LIKE|IN|BETWEEN|IS|NULL|DESC|ASC|COUNT|SUM|AVG|MIN|MAX|COALESCE|WITH"
 )
 
 TOKEN_PATTERN = re.compile(
@@ -20,8 +20,6 @@ COLORS = {"string": "#CE9178", "qident": "#9CDCFE", "number": "#B5CEA8", "keywor
 
 
 def highlight_sql(sql: str) -> str:
-    """Manually tokenize and color SQL for a dark VS Code-style theme —
-    Streamlit's built-in st.code highlighting is tuned for light backgrounds only."""
     out, last_end = [], 0
     for match in TOKEN_PATTERN.finditer(sql):
         out.append(html_lib.escape(sql[last_end:match.start()]))
@@ -35,8 +33,6 @@ def highlight_sql(sql: str) -> str:
 
 
 def render_dark_table(df) -> str:
-    """Build a plain HTML table for full dark-theme control — st.dataframe
-    is canvas-rendered and can't be restyled with CSS."""
     header = "".join(f"<th>{html_lib.escape(str(c))}</th>" for c in df.columns)
     rows = ""
     for _, row in df.iterrows():

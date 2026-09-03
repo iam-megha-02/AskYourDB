@@ -1,9 +1,14 @@
 import sqlite3
 
-conn = sqlite3.connect("ecommerce.db")
+conn = sqlite3.connect("data/ecommerce.db")
 cursor = conn.cursor()
 
 cursor.executescript("""
+DROP TABLE IF EXISTS order_items;
+DROP TABLE IF EXISTS orders;
+DROP TABLE IF EXISTS products;
+DROP TABLE IF EXISTS customers;
+
 CREATE TABLE customers (
     customer_id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -40,4 +45,4 @@ CREATE TABLE order_items (
 
 conn.commit()
 conn.close()
-print("Schema created successfully.")
+print("Schema created successfully (existing tables dropped first).")

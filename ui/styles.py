@@ -9,20 +9,13 @@ h1, h2, h3 {
     font-family: 'Space Grotesk', sans-serif !important;
     letter-spacing: -0.01em;
 }
-
 .block-container {
     padding-top: 1rem !important;
     padding-bottom: 1rem !important;
 }
-h1 {
-    margin-bottom: 0.2rem !important;
-}
-[data-testid="stCaptionContainer"] {
-    margin-bottom: 0.5rem !important;
-}
-header[data-testid="stHeader"] {
-    height: 2rem;
-}
+h1 { margin-bottom: 0.2rem !important; }
+[data-testid="stCaptionContainer"] { margin-bottom: 0.5rem !important; }
+header[data-testid="stHeader"] { height: 2rem; }
 
 .panel-header {
     font-family: 'Space Grotesk', sans-serif;
@@ -33,18 +26,9 @@ header[data-testid="stHeader"] {
 }
 .chat-header { background-color: #0B6E76; }
 
-[data-testid="stAlert"] {
-    border-radius: 8px;
-    border-left: 4px solid #D9932E;
-}
-.stButton button {
-    border-radius: 6px;
-    font-family: 'Space Grotesk', sans-serif;
-    font-weight: 500;
-}
-[data-testid="stChatInputSubmitButton"] {
-    background-color: #0B6E76 !important;
-}
+[data-testid="stAlert"] { border-radius: 8px; border-left: 4px solid #D9932E; }
+.stButton button { border-radius: 6px; font-family: 'Space Grotesk', sans-serif; font-weight: 500; }
+[data-testid="stChatInputSubmitButton"] { background-color: #0B6E76 !important; }
 
 :root {
     --chrome: #17181D;
@@ -60,6 +44,9 @@ header[data-testid="stHeader"] {
     border-radius: 10px !important;
 }
 .sticky-tab {
+    position: sticky;
+    top: 0;
+    z-index: 10;
     background-color: var(--chrome);
     padding: 10px 18px;
     display: flex;
@@ -87,23 +74,33 @@ table.dark-table { width: 100%; border-collapse: collapse; font-family: 'IBM Ple
 table.dark-table th { background-color: var(--chrome); text-align: left; padding: 8px 10px; border: 1px solid var(--border); color: #9CDCFE; }
 table.dark-table td { padding: 8px 10px; border: 1px solid var(--border); }
 
-[data-testid="stExpander"] {
-    font-size: 0.95rem !important;
-}
-[data-testid="stExpander"] p, [data-testid="stExpander"] li {
-    font-size: 0.95rem !important;
-}
+[data-testid="stExpander"] { font-size: 0.95rem !important; }
+[data-testid="stExpander"] p, [data-testid="stExpander"] li { font-size: 0.95rem !important; }
 .schema-card-body {
     height: 220px;
     overflow-y: auto;
     padding-right: 6px;
 }
-.schema-card-body ul {
-    margin: 0;
-    padding-left: 20px;
+.schema-card-body ul { margin: 0; padding-left: 20px; }
+.schema-card-body li { margin-bottom: 4px; }
+
+/* Native Streamlit text/labels/buttons inside the dark inspector panel —
+   Streamlit's default text color assumes a light background */
+.st-key-inspector_box p,
+.st-key-inspector_box li,
+.st-key-inspector_box label,
+.st-key-inspector_box [data-testid="stMarkdownContainer"] {
+    color: var(--text) !important;
 }
-.schema-card-body li {
-    margin-bottom: 4px;
+.st-key-inspector_box .stButton button {
+    color: var(--text) !important;
+    background-color: var(--chrome) !important;
+    border: 1px solid var(--border) !important;
+}
+.st-key-chat_scroll {
+    border-top: none !important;
+    border-radius: 0 0 10px 10px !important;
+    margin-top: -1px !important;
 }
 </style>
 """

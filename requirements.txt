@@ -6,3 +6,4 @@ langchain-community==0.0.36
 langchain-groq==0.1.3
 python-dotenv
 Faker
+sqlglot==30.17.0

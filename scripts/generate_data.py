@@ -2,8 +2,12 @@ import sqlite3
 import random
 from faker import Faker
 
+random.seed(42)
+
 fake = Faker()
-conn = sqlite3.connect("ecommerce.db")
+Faker.seed(42)
+
+conn = sqlite3.connect("data/ecommerce.db")
 cursor = conn.cursor()
 
 # --- Customers ---
@@ -14,7 +18,7 @@ for i in range(1, 51):  # 50 customers
         fake.name(),
         fake.email(),
         fake.city(),
-        fake.date_between(start_date="-2y", end_date="today").isoformat()
+        fake.date_between(start_date="-2y", end_date="2026-01-01").isoformat()
     ))
 cursor.executemany("INSERT INTO customers VALUES (?, ?, ?, ?, ?)", customers)
 
@@ -37,7 +41,7 @@ for order_id in range(1, 151):  # 150 orders
     orders.append((
         order_id,
         random.randint(1, 50),
-        fake.date_between(start_date="-1y", end_date="today").isoformat(),
+        fake.date_between(start_date="-1y", end_date="2026-01-01").isoformat(),
         random.choice(statuses)
     ))
 cursor.executemany("INSERT INTO orders VALUES (?, ?, ?, ?)", orders)

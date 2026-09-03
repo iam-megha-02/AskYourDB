@@ -47,8 +47,8 @@ def load_recent_history(db_name: str, limit: int = 5):
 
 
 def format_history_for_prompt(history_rows) -> str:
-    """Turns saved history rows into text the SQL-generation prompt can use
-    to resolve follow-up references like 'those', 'it', 'the same but...'."""
+    """Turns saved history rows into text the rewriting step can use to
+    resolve follow-up references like 'those', 'it', 'the same but...'."""
     if not history_rows:
         return "(no prior questions this session)"
     lines = []
